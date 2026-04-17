@@ -532,7 +532,7 @@ class TradePoll(models.Model):
     Voting poll created when a Discussion unlocks.
     Implements the Hybrid State-Machine:
       - Standard mode: 60% quorum within 24 hours
-      - Turbo-Reduction: if 100% vote, timer reduces by 90%
+      - Turbo-Reduction: if 100% vote, timer reduces by 95%
     """
 
     STATUS_CHOICES = [
@@ -567,7 +567,7 @@ class TradePoll(models.Model):
     reduced_deadline = models.DateTimeField(
         null=True,
         blank=True,
-        help_text=_("Deadline after Turbo-Reduction (90% time drop)")
+        help_text=_("Deadline after Turbo-Reduction (95% time drop)")
     )
 
     turbo_reduction_applied = models.BooleanField(
@@ -617,7 +617,7 @@ class TradePoll(models.Model):
 
     def apply_turbo_reduction(self):
         """
-        If 100% of members have voted, reduce the remaining time by 90%.
+        If 100% of members have voted, reduce the remaining time by 95%.
         e.g., 24 hours remaining → 2.4 hours remaining.
         Does NOT execute instantly — ensures a cool-down period.
         """

@@ -41,6 +41,8 @@ ALLOWED_HOSTS = []
 #     "Users"
 # ]
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -89,6 +91,13 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'backend.wsgi.application'
+ASGI_APPLICATION = 'backend.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 AUTH_USER_MODEL = 'users.User'
 
@@ -169,3 +178,6 @@ CORS_ALLOWED_ORIGINS = [
     
 ]
 ALLOWED_HOSTS = ['192.168.0.106', 'localhost', '127.0.0.1']
+
+# Email settings for development (Prints email to console)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

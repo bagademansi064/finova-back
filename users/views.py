@@ -10,8 +10,14 @@ from .serializers import (
     UserPublicSerializer,
     UserUpdateSerializer,
     ChangePasswordSerializer,
-    UserStatsSerializer
+    UserStatsSerializer,
+    FinovaIDLoginSerializer,
+    EmailOTPVerifySerializer
 )
+from .models import EmailVerificationOTP
+from django.core.mail import send_mail
+import random
+from rest_framework_simplejwt.tokens import RefreshToken
 from .permissions import IsOwnerOrReadOnly
 
 User = get_user_model()
@@ -31,9 +37,22 @@ class UserRegistrationView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         
+        # Generate 6-digit OTP
+        otp_code = f"{random.randint(100000, 999999)}"
+        EmailVerificationOTP.objects.create(user=user, otp=otp_code)
+        
+        # Send Email Verification
+        send_mail(
+            subject='Verify your Finova Email',
+            message=f'Hello {user.first_name},\n\nYour Finova Verification Code is: {otp_code}\n\nThis code will expire in 10 minutes.\n\nYour Finova ID is: {user.finova_id}',
+            from_email='support@finova.com',
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        
         return Response({
             "user": UserProfileSerializer(user, context=self.get_serializer_context()).data,
-            "message": "Account created successfully! Please verify your email."
+            "message": "Account created successfully! Please check your email for the verification code."
         }, status=status.HTTP_201_CREATED)
 
 
@@ -134,20 +153,7 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = UserStatsSerializer(user)
         return Response(serializer.data)
     
-    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
-    def verify_email(self, request):
-        """
-        Verify user email (simplified - add token logic later)
-        POST /api/users/verify_email/
-        """
-        # TODO: Implement email verification token logic
-        user = request.user
-        user.is_verified = True
-        user.save()
-        
-        return Response({
-            "message": "Email verified successfully"
-        }, status=status.HTTP_200_OK)
+
     
     @action(detail=False, methods=['delete'], permission_classes=[IsAuthenticated])
     def deactivate_account(self, request):
@@ -161,4 +167,77 @@ class UserViewSet(viewsets.ModelViewSet):
         
         return Response({
             "message": "Account deactivated successfully"
+        }, status=status.HTTP_200_OK)
+
+
+class FinovaIDLoginView(generics.GenericAPIView):
+    """
+    Login endpoint using Finova ID and Password
+    POST /api/users/login/
+    """
+    serializer_class = FinovaIDLoginSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        finova_id = serializer.validated_data['finova_id'].upper()
+        password = serializer.validated_data['password']
+        
+        try:
+            user = User.objects.get(finova_id=finova_id)
+        except User.DoesNotExist:
+            return Response({"detail": "Invalid Finova ID or password."}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        if not user.check_password(password):
+            return Response({"detail": "Invalid Finova ID or password."}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        if getattr(user, 'is_active', None) is False:
+            return Response({"detail": "User account is disabled."}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'user': UserProfileSerializer(user, context={'request': request}).data
+        }, status=status.HTTP_200_OK)
+
+
+class VerifyEmailOTPView(generics.GenericAPIView):
+    """
+    Verify Email using OTP
+    POST /api/users/verify-email/
+    """
+    serializer_class = EmailOTPVerifySerializer
+    permission_classes = [AllowAny]
+    
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        otp = serializer.validated_data['otp']
+        
+        try:
+            user = User.objects.get(email=email)
+            otp_record = user.email_verification_otp
+        except (User.DoesNotExist, EmailVerificationOTP.DoesNotExist):
+            return Response({"detail": "Invalid email or no OTP requested."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if otp_record.otp != otp:
+            return Response({"detail": "Invalid OTP code."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not otp_record.is_valid():
+            otp_record.delete()
+            return Response({"detail": "OTP has expired. Please request another one."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Verify user
+        user.is_verified = True
+        user.save(update_fields=['is_verified'])
+        otp_record.delete()
+        
+        return Response({
+            "message": "Email verified successfully! You can now log in."
         }, status=status.HTTP_200_OK)

@@ -113,6 +113,14 @@ class User(AbstractUser):
         help_text=_("Email/identity verified status")
     )
     
+    pan_card = models.CharField(
+        max_length=10, 
+        unique=True, 
+        null=True, 
+        blank=True,
+        help_text=_("User's PAN card for verification")
+    )
+    
     phone_number = models.CharField(
         max_length=10,
         blank=True,
@@ -254,3 +262,21 @@ class User(AbstractUser):
         """Increment vote participation counter"""
         self.total_votes_cast += 1
         self.save(update_fields=['total_votes_cast', 'updated_at'])
+
+
+class EmailVerificationOTP(models.Model):
+    """
+    Model to store OTPs for email verification.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='email_verification_otp')
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def is_valid(self):
+        from django.utils import timezone
+        import datetime
+        # OTP is valid for 10 minutes
+        return timezone.now() < self.created_at + datetime.timedelta(minutes=10)
+
+    def __str__(self):
+        return f"OTP for {self.user.email}"

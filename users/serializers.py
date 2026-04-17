@@ -1,8 +1,10 @@
 from rest_framework import serializers
-from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from datetime import date
+import re
 
 User = get_user_model()
 
@@ -28,7 +30,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'username', 'password', 'password_confirm',
             'first_name', 'last_name', 'date_of_birth', 'gender_identity',
-            'gender_identity_custom', 'bio'
+            'gender_identity_custom', 'bio', 'pan_card'
         ]
         read_only_fields = ['id', 'finova_id']
     
@@ -51,6 +53,11 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                 })
         
         return attrs
+    
+    def validate_pan_card(self, value):
+        if value and not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$', value):
+            raise serializers.ValidationError("Invalid PAN Card format. Must be like ABCDE1234F.")
+        return value
     
     def create(self, validated_data):
         validated_data.pop('password_confirm')
@@ -167,3 +174,19 @@ class UserStatsSerializer(serializers.ModelSerializer):
             'consensus_score', 'learning_level', 'user_level', 'total_reels_watched',
             'total_votes_cast'
         ]
+
+
+class FinovaIDLoginSerializer(serializers.Serializer):
+    """
+    Serializer for logging in using Finova ID and password
+    """
+    finova_id = serializers.CharField(required=True)
+    password = serializers.CharField(required=True, write_only=True)
+
+
+class EmailOTPVerifySerializer(serializers.Serializer):
+    """
+    Serializer for verifying Email via OTP
+    """
+    email = serializers.EmailField(required=True)
+    otp = serializers.CharField(max_length=6, required=True)

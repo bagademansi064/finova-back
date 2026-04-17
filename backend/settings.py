@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'users.apps.UsersConfig',
     'groups.apps.GroupsConfig',
     'chat.apps.ChatConfig',
+    'market.apps.MarketConfig',
 ]
 
 MIDDLEWARE = [

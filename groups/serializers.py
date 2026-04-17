@@ -75,7 +75,7 @@ class GroupCreateSerializer(serializers.ModelSerializer):
     def validate_max_members(self, value):
         if value < 2:
             raise serializers.ValidationError("A group must allow at least 2 members.")
-        if value > 50:
+        if value > 10:
             raise serializers.ValidationError("A group can have at most 50 members.")
         return value
 

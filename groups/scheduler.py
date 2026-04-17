@@ -4,6 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from django_apscheduler.jobstores import DjangoJobStore
 from django.utils import timezone
 from .models import Discussion
+from market.tasks import sync_market_data, sync_market_fundamentals
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,22 @@ def start():
         cleanup_expired_proposals,
         trigger=IntervalTrigger(minutes=1),  # Check every 1 minute
         id="cleanup_expired_proposals",
+        max_instances=1,
+        replace_existing=True,
+    )
+    
+    scheduler.add_job(
+        sync_market_data,
+        trigger=IntervalTrigger(minutes=1),  # Sync Market every 1 minute
+        id="sync_market_data",
+        max_instances=1,
+        replace_existing=True,
+    )
+    
+    scheduler.add_job(
+        sync_market_fundamentals,
+        trigger=IntervalTrigger(hours=6),  # Heavy Pacer every 6 hours
+        id="sync_market_fundamentals",
         max_instances=1,
         replace_existing=True,
     )

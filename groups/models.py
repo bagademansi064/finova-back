@@ -241,7 +241,7 @@ class GroupWallet(models.Model):
 
 class WalletTransaction(models.Model):
     """
-    Secure ledger preventing race conditions.
+    Secure ledger preventnig race conditions.
     """
     TRANSACTION_TYPES = [
         ('deposit', 'Deposit'),

@@ -8,7 +8,8 @@ from django.utils import timezone
 from django.db.models import Count, Q
 from .models import (
     Group, GroupMember, GroupMessage, GroupWallet, WalletTransaction,
-    Discussion, DiscussionComment, TradePoll, Vote, JoinRequest
+    Discussion, DiscussionComment, TradePoll, Vote, JoinRequest,
+    GroupInvitation
 )
 from .serializers import (
     GroupCreateSerializer, GroupListSerializer, GroupDetailSerializer,
@@ -17,7 +18,7 @@ from .serializers import (
     DiscussionSerializer, DiscussionCreateSerializer,
     DiscussionCommentSerializer,
     TradePollSerializer, VoteCreateSerializer, VoteSerializer,
-    JoinRequestSerializer
+    JoinRequestSerializer, GroupInvitationSerializer
 )
 from .permissions import IsGroupMember, IsGroupAdmin
 
@@ -343,6 +344,59 @@ class GroupViewSet(viewsets.ModelViewSet):
         membership.save(update_fields=['is_active'])
 
         return Response({"message": f"{target_user.username} has been removed from {group.name}."})
+
+    # ── Invitations ──
+
+    @action(detail=True, methods=['post'], url_path='invite')
+    def invite(self, request, finova_id=None):
+        """
+        Invite a user by Finova ID. Admin/moderator only.
+        Body: { "user_finova_id": "ABC123" }
+        """
+        group = self.get_object()
+        
+        # Check permissions
+        is_admin_or_mod = group.members.filter(
+            user=request.user, 
+            role__in=['admin', 'moderator'], 
+            is_active=True
+        ).exists()
+        
+        if not is_admin_or_mod:
+            return Response({"error": "Only admins or moderators can invite members."}, status=status.HTTP_403_FORBIDDEN)
+            
+        user_finova_id = request.data.get('user_finova_id')
+        if not user_finova_id:
+            return Response({"error": "user_finova_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        target_user = User.objects.filter(finova_id=user_finova_id.upper()).first()
+        
+        if not target_user:
+            return Response({"error": "User with this Finova ID not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        if group.members.filter(user=target_user, is_active=True).exists():
+            return Response({"error": "User is already a member of this group."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if group.is_full:
+            return Response({"error": "Group is full."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        invitation, created = GroupInvitation.objects.get_or_create(
+            group=group,
+            invitee=target_user,
+            defaults={'invited_by': request.user, 'status': 'pending'}
+        )
+        
+        if not created:
+            if invitation.status == 'pending':
+                return Response({"message": "An invitation is already pending for this user."}, status=status.HTTP_200_OK)
+            # Re-invite if previously rejected
+            invitation.status = 'pending'
+            invitation.invited_by = request.user
+            invitation.save()
+            
+        return Response({"message": f"Invitation sent to {target_user.username} successfully."}, status=status.HTTP_201_CREATED)
 
     # ── Wallet Management ──
 
@@ -692,3 +746,51 @@ class TradePollViewSet(GroupLookupMixin, viewsets.ReadOnlyModelViewSet):
             "turbo_applied": poll.turbo_reduction_applied,
             "poll": TradePollSerializer(poll).data,
         }, status=status.HTTP_201_CREATED)
+
+
+# ──────────────────── Group Invitations ────────────────────
+
+class GroupInvitationViewSet(viewsets.ModelViewSet):
+    """
+    User-side management of group invitations.
+    GET /api/invitations/          — list your received invitations
+    POST /api/invitations/{id}/respond/ — accept or reject
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = GroupInvitationSerializer
+    http_method_names = ['get', 'post']
+
+    def get_queryset(self):
+        return GroupInvitation.objects.filter(invitee=self.request.user, status='pending').select_related('group', 'invited_by')
+
+    @action(detail=True, methods=['post'])
+    def respond(self, request, pk=None):
+        """Respond to an invitation: { "action": "accept" | "reject" }"""
+        invitation = self.get_object()
+        user_action = request.data.get('action')
+
+        if user_action == 'accept':
+            if invitation.group.is_full:
+                return Response({"error": "Group is full."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            invitation.status = 'accepted'
+            invitation.save()
+
+            # Create membership
+            membership, created = GroupMember.objects.get_or_create(
+                group=invitation.group, user=request.user,
+                defaults={'role': 'member'}
+            )
+            if not created and not membership.is_active:
+                membership.is_active = True
+                membership.save()
+            
+            return Response({"message": f"Joined {invitation.group.name} successfully."})
+        
+        elif user_action == 'reject':
+            invitation.status = 'rejected'
+            invitation.save()
+            return Response({"message": "Invitation rejected."})
+        
+        return Response({"error": "Invalid action. Use 'accept' or 'reject'."}, status=status.HTTP_400_BAD_REQUEST)
+

@@ -639,6 +639,7 @@ class TradePoll(models.Model):
 
     def resolve(self):
         """Determine the outcome of the poll and update the related discussion."""
+        from market.models import StockCache  # Local import to avoid circular dependencies
         if self.status != 'active':
             return
 
@@ -661,13 +662,16 @@ class TradePoll(models.Model):
                 if winner == self.discussion.discussion_type:
                     wallet = self.discussion.group.wallet
                     amount = self.discussion.required_capital
+                    symbol = self.discussion.stock_symbol
 
                     if winner == 'buy':
                         # Only execute if sufficient funds
                         if wallet.current_balance >= amount:
+                            # 1. Deduct from wallet
                             wallet.current_balance -= amount
                             wallet.save(update_fields=['current_balance'])
 
+                            # 2. Record Transaction
                             WalletTransaction.objects.create(
                                 wallet=wallet,
                                 user=self.discussion.proposed_by,
@@ -675,23 +679,72 @@ class TradePoll(models.Model):
                                 transaction_type='trade_buy',
                                 reference_id=str(self.discussion.id)
                             )
+
+                            # 3. Update Group Holding
+                            stock_info = StockCache.objects.filter(symbol=symbol).first()
+                            current_price = stock_info.current_price if stock_info else None
+                            
+                            # If no cache exists, we can't calculate quantity perfectly, 
+                            # but in this system market tasks should have it.
+                            if current_price and current_price > 0:
+                                quantity = amount / current_price
+                                holding, created = GroupHolding.objects.get_or_create(
+                                    group=self.discussion.group,
+                                    stock_symbol=symbol,
+                                    defaults={
+                                        'quantity': 0,
+                                        'average_buy_price': 0,
+                                        'total_invested': 0
+                                    }
+                                )
+                                holding.total_invested += amount
+                                holding.quantity += quantity
+                                holding.average_buy_price = holding.total_invested / holding.quantity
+                                holding.save()
                         else:
                             # Not enough funds to execute the buy trade
                             self.status = 'failed'
                             self.discussion.status = 'cancelled'
                     
                     elif winner == 'sell':
-                        # Adds capital back to the wallet upon a successful sell vote
-                        wallet.current_balance += amount
-                        wallet.save(update_fields=['current_balance'])
+                        # Record the successful cash out
+                        holding = GroupHolding.objects.filter(
+                            group=self.discussion.group, 
+                            stock_symbol=symbol
+                        ).first()
 
-                        WalletTransaction.objects.create(
-                            wallet=wallet,
-                            user=self.discussion.proposed_by,
-                            amount=amount,
-                            transaction_type='trade_sell',
-                            reference_id=str(self.discussion.id)
-                        )
+                        if holding:
+                            # Calculate proceeds based on current market price
+                            stock_info = StockCache.objects.filter(symbol=symbol).first()
+                            current_price = stock_info.current_price if stock_info else holding.average_buy_price
+                            
+                            sell_proceeds = holding.quantity * current_price
+                            
+                            wallet.current_balance += sell_proceeds
+                            wallet.save(update_fields=['current_balance'])
+
+                            WalletTransaction.objects.create(
+                                wallet=wallet,
+                                user=self.discussion.proposed_by,
+                                amount=sell_proceeds,
+                                transaction_type='trade_sell',
+                                reference_id=str(self.discussion.id)
+                            )
+
+                            # Clear the holding
+                            holding.delete()
+                        else:
+                            # We don't actually have this stock? Fallback to original logic
+                            wallet.current_balance += amount
+                            wallet.save(update_fields=['current_balance'])
+
+                            WalletTransaction.objects.create(
+                                wallet=wallet,
+                                user=self.discussion.proposed_by,
+                                amount=amount,
+                                transaction_type='trade_sell',
+                                reference_id=str(self.discussion.id)
+                            )
             else:
                 self.status = 'failed'
                 self.discussion.status = 'rejected'
@@ -744,3 +797,77 @@ class Vote(models.Model):
 
     def __str__(self):
         return f"{self.voter.username} voted {self.choice} on {self.poll.discussion.stock_symbol}"
+
+
+class GroupInvitation(models.Model):
+    """
+    Direct invitations from group admins to users via Finova ID.
+    Unlike JoinRequests (User -> Group), invitations are (Group Admin -> User).
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    group = models.ForeignKey(
+        Group, 
+        on_delete=models.CASCADE, 
+        related_name='invitations'
+    )
+    
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='sent_invitations'
+    )
+    
+    invitee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='received_invitations'
+    )
+    
+    status = models.CharField(
+        max_length=10, 
+        choices=STATUS_CHOICES, 
+        default='pending'
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('group invitation')
+        verbose_name_plural = _('group invitations')
+        unique_together = ['group', 'invitee']
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Invite: {self.group.name} -> {self.invitee.username} ({self.status})"
+
+
+class GroupHolding(models.Model):
+    """
+    Explicitly tracks the stocks owned by an investment club.
+    Used for Profit/Loss calculations on the Home dashboard.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='holdings')
+    stock_symbol = models.CharField(max_length=20)
+    
+    quantity = models.DecimalField(max_digits=12, decimal_places=6, default=0.00)
+    average_buy_price = models.DecimalField(max_digits=12, decimal_places=4, default=0.00)
+    total_invested = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('group holding')
+        verbose_name_plural = _('group holdings')
+        unique_together = ['group', 'stock_symbol']
+
+    def __str__(self):
+        return f"[{self.group.name}] {self.stock_symbol}: {self.quantity} shares"

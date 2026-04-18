@@ -7,6 +7,7 @@ from datetime import date
 import re
 
 User = get_user_model()
+from .models import UserWatchlist
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -85,6 +86,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'full_name', 'date_of_birth', 'age', 'gender_identity',
             'gender_identity_custom', 'display_gender', 'profile_picture',
             'bio', 'is_verified', 'phone_number', 'consensus_score',
+            'individual_virtual_capital',
             'learning_level', 'user_level', 'total_reels_watched', 'total_votes_cast',
             'notification_preferences', 'privacy_settings',
             'created_at', 'updated_at', 'last_login'
@@ -189,4 +191,13 @@ class EmailOTPVerifySerializer(serializers.Serializer):
     Serializer for verifying Email via OTP
     """
     email = serializers.EmailField(required=True)
-    otp = serializers.CharField(max_length=6, required=True)
+    otp = serializers.CharField(max_length=6, required=True)
+
+
+class UserWatchlistSerializer(serializers.ModelSerializer):
+    """
+    Serializer for user's personal watchlist.
+    """
+    class Meta:
+        model = UserWatchlist
+        fields = ['symbols', 'updated_at']

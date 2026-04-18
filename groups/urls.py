@@ -3,9 +3,11 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     GroupViewSet, GroupMessageViewSet,
     DiscussionViewSet, TradePollViewSet,
+    GroupInvitationViewSet
 )
 
 router = DefaultRouter()
+router.register(r'invitations', GroupInvitationViewSet, basename='invitation')
 router.register(r'', GroupViewSet, basename='group')
 
 app_name = 'groups'

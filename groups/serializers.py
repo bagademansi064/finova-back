@@ -2,10 +2,37 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
     Group, GroupMember, GroupMessage, GroupWallet, WalletTransaction,
-    Discussion, DiscussionComment, TradePoll, Vote, JoinRequest
+    Discussion, DiscussionComment, TradePoll, Vote, JoinRequest,
+    GroupInvitation, GroupHolding
 )
+from market.models import StockCache
 
 User = get_user_model()
+
+
+class GroupHoldingSerializer(serializers.ModelSerializer):
+    current_price = serializers.SerializerMethodField()
+    profit_loss_percent = serializers.SerializerMethodField()
+    group_name = serializers.ReadOnlyField(source='group.name')
+
+    class Meta:
+        model = GroupHolding
+        fields = [
+            'id', 'group', 'group_name', 'stock_symbol', 'quantity', 
+            'average_buy_price', 'total_invested', 'current_price', 
+            'profit_loss_percent', 'updated_at'
+        ]
+
+    def get_current_price(self, obj):
+        stock = StockCache.objects.filter(symbol=obj.stock_symbol).first()
+        return stock.current_price if stock else None
+
+    def get_profit_loss_percent(self, obj):
+        stock = StockCache.objects.filter(symbol=obj.stock_symbol).first()
+        if stock and stock.current_price and obj.average_buy_price > 0:
+            diff = stock.current_price - obj.average_buy_price
+            return (diff / obj.average_buy_price) * 100
+        return 0
 
 
 # ──────────────────────── Member Serializers ────────────────────────
@@ -44,6 +71,29 @@ class JoinRequestSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'group', 'user', 'status', 'created_at']
 
 
+class GroupInvitationSerializer(serializers.ModelSerializer):
+    """Serializer for group invitations sent by admins to users."""
+    group_name = serializers.CharField(source='group.name', read_only=True)
+    group_finova_id = serializers.CharField(source='group.finova_id', read_only=True)
+    group_member_count = serializers.IntegerField(source='group.member_count', read_only=True)
+    group_risk_level = serializers.CharField(source='group.risk_level', read_only=True)
+    group_description = serializers.CharField(source='group.description', read_only=True)
+    invited_by_username = serializers.CharField(source='invited_by.username', read_only=True)
+    invitee_username = serializers.CharField(source='invitee.username', read_only=True)
+    invitee_finova_id = serializers.CharField(source='invitee.finova_id', read_only=True)
+
+    class Meta:
+        model = GroupInvitation
+        fields = [
+            'id', 'group', 'group_name', 'group_finova_id', 
+            'group_member_count', 'group_risk_level', 'group_description',
+            'invited_by', 'invited_by_username',
+            'invitee', 'invitee_username', 'invitee_finova_id',
+            'status', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'group', 'invited_by', 'invitee', 'status', 'created_at', 'updated_at']
+
+
 # ──────────────────────── Group Serializers ────────────────────────
 
 class WalletTransactionSerializer(serializers.ModelSerializer):
@@ -64,25 +114,44 @@ class GroupWalletSerializer(serializers.ModelSerializer):
 
 class GroupCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating a new investment group."""
+    invited_finova_ids = serializers.ListField(
+        child=serializers.CharField(max_length=10),
+        write_only=True,
+        required=False,
+        help_text="Optional list of Finova IDs to invite during creation."
+    )
 
     class Meta:
         model = Group
         fields = [
             'name', 'description', 'guidelines', 'group_photo',
             'risk_level', 'max_members', 'requires_approval', 'minimum_trust_score',
+            'invited_finova_ids'
         ]
 
     def validate_max_members(self, value):
         if value < 2:
             raise serializers.ValidationError("A group must allow at least 2 members.")
-        if value > 10:
+        if value > 50:
             raise serializers.ValidationError("A group can have at most 50 members.")
         return value
 
     def create(self, validated_data):
+        invited_finova_ids = validated_data.pop('invited_finova_ids', [])
         user = self.context['request'].user
         group = Group.objects.create(created_by=user, **validated_data)
-        # Creator automatically becomes admin via post_save signal
+        
+        # Handle initial invitations
+        if invited_finova_ids:
+            for fid in invited_finova_ids:
+                invitee = User.objects.filter(finova_id=fid.upper()).first()
+                if invitee and invitee != user:
+                    GroupInvitation.objects.get_or_create(
+                        group=group,
+                        invited_by=user,
+                        invitee=invitee
+                    )
+        
         return group
 
 

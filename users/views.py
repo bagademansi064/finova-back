@@ -12,9 +12,13 @@ from .serializers import (
     ChangePasswordSerializer,
     UserStatsSerializer,
     FinovaIDLoginSerializer,
-    EmailOTPVerifySerializer
+    EmailOTPVerifySerializer,
+    UserWatchlistSerializer
 )
-from .models import EmailVerificationOTP
+from .models import EmailVerificationOTP, UserWatchlist
+from groups.models import GroupHolding
+from groups.serializers import GroupHoldingSerializer
+from market.models import StockCache
 from django.core.mail import send_mail
 import random
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -169,6 +173,62 @@ class UserViewSet(viewsets.ModelViewSet):
             "message": "Account deactivated successfully"
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def dashboard(self, request):
+        """
+        Main dashboard data: Aggregate holdings from all user groups + watchlist
+        GET /api/users/dashboard/
+        """
+        # 1. Get holdings from all groups user belongs to
+        # Note: joined_groups is related_name from GroupMember
+        user_groups_ids = request.user.group_memberships.all().values_list('group_id', flat=True)
+        holdings = GroupHolding.objects.filter(group_id__in=user_groups_ids)
+        holdings_data = GroupHoldingSerializer(holdings, many=True).data
+
+        # 2. Get user's personal watchlist
+        watchlist, _ = UserWatchlist.objects.get_or_create(user=request.user)
+        
+        # Hydrate watchlist symbols with current price data
+        watchlist_stocks = StockCache.objects.filter(symbol__in=watchlist.symbols)
+        
+        # Minimal data for watchlist
+        watchlist_data = []
+        for symbol in watchlist.symbols:
+            stock = next((s for s in watchlist_stocks if s.symbol == symbol), None)
+            watchlist_data.append({
+                'symbol': symbol,
+                'current_price': float(stock.current_price) if stock and stock.current_price else 0,
+                'percent_change': float(stock.percent_change) if stock and stock.percent_change else 0,
+            })
+
+        return Response({
+            "invested": holdings_data,
+            "watchlist": watchlist_data
+        })
+
+    @action(detail=False, methods=['post', 'delete'], permission_classes=[IsAuthenticated])
+    def watchlist(self, request):
+        """
+        Add or remove symbols from personal watchlist
+        POST/DELETE /api/users/watchlist/
+        """
+        symbol = request.data.get('symbol', '').upper()
+        if not symbol:
+            return Response({"error": "Symbol is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        watchlist, _ = UserWatchlist.objects.get_or_create(user=request.user)
+        
+        if request.method == 'POST':
+            if symbol not in watchlist.symbols:
+                watchlist.symbols.append(symbol)
+                watchlist.save()
+            return Response({"symbols": watchlist.symbols, "message": f"Added {symbol}"})
+            
+        elif request.method == 'DELETE':
+            if symbol in watchlist.symbols:
+                watchlist.symbols.remove(symbol)
+                watchlist.save()
+            return Response({"symbols": watchlist.symbols, "message": f"Removed {symbol}"})
 
 class FinovaIDLoginView(generics.GenericAPIView):
     """

@@ -206,11 +206,11 @@ class User(AbstractUser):
         return f"@{self.username} [{self.finova_id}] ({self.email})"
     
     def save(self, *args, **kwargs):
-        is_new = self.pk is None
+        is_new = self._state.adding
         if not self.finova_id:
             self.finova_id = generate_finova_id()
             
-        if is_new:
+        if is_new and self.individual_virtual_capital == 0:
             from decimal import Decimal
             if self.gender_identity == 'woman':
                 self.individual_virtual_capital = Decimal('55000.00')
@@ -279,4 +279,18 @@ class EmailVerificationOTP(models.Model):
         return timezone.now() < self.created_at + datetime.timedelta(minutes=10)
 
     def __str__(self):
-        return f"OTP for {self.user.email}"
+        return f"OTP for {self.user.email}"
+
+
+class UserWatchlist(models.Model):
+    """
+    Personalized watchlist for individual users.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='watchlist')
+    symbols = models.JSONField(default=list, blank=True, help_text="List of stock symbols")
+    
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Watchlist for {self.user.username}"

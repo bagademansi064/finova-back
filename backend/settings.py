@@ -166,9 +166,19 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://192.168.0.1:3000", 
-    "http://26.49.245.3:3000",
+    "http://192.168.0.106:3000",
     "http://localhost",  # For Capacitor Android
     "capacitor://localhost",  # For Capacitor iOS
+]
+
+
+
+CSRF_TRUSTED_ORIGINS = [
+
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://192.168.0.1:3000",
+    "http://192.168.0.106:3000",
 ]
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
 

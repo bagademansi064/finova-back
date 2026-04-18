@@ -38,6 +38,20 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
     # Receive message from WebSocket
     async def receive(self, text_data):
         text_data_json = json.loads(text_data)
+        msg_type = text_data_json.get('type', 'message') # 'message' or 'typing'
+        
+        if msg_type == 'typing':
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    'type': 'group_user_typing',
+                    'sender_finova_id': self.scope['user'].finova_id,
+                    'sender_username': self.scope['user'].username,
+                    'is_typing': text_data_json.get('is_typing', True)
+                }
+            )
+            return
+
         content = text_data_json.get('content', '')
         reply_to_id = text_data_json.get('reply_to', None)
         message_type = text_data_json.get('message_type', 'text')
@@ -74,6 +88,10 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
     # Receive message from room group
     async def group_message_broadcast(self, event):
         # Send message to WebSocket
+        await self.send(text_data=json.dumps(event))
+
+    async def group_user_typing(self, event):
+        # Send typing notification to WebSocket
         await self.send(text_data=json.dumps(event))
 
     @database_sync_to_async

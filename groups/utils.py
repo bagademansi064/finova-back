@@ -64,8 +64,8 @@ def detect_message_type(content):
       /stocks "SYMBOL"          -> stock_card  (legacy)
       /news "topic"             -> news_card
     """
-    # New format: /stock SYMBOL [discuss|poll buy|poll sell]
-    new_pattern = r'/stock\s+["\']?([A-Za-z0-9._-]+)["\']?(?:\s+(?:discuss|poll\s+(?:buy|sell)))?'
+    # New format: /stock SYMBOL [discuss|poll buy|poll sell|poll]
+    new_pattern = r'/stock\s+["\']?([A-Za-z0-9._-]+)["\']?(?:\s+(?:discuss|poll(?:\s+(?:buy|sell))?))?'
     match = re.match(new_pattern, content.strip(), re.IGNORECASE)
     if match:
         return 'stock_card', match.group(1).upper()

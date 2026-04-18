@@ -639,6 +639,19 @@ class TradePollViewSet(GroupLookupMixin, viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Capital contribution gate: User must have deposited at least once.
+        has_deposited = WalletTransaction.objects.filter(
+            wallet=poll.discussion.group.wallet,
+            user=request.user,
+            transaction_type='deposit'
+        ).exists()
+
+        if not has_deposited:
+            return Response(
+                {"error": "You must contribute to the pool capital before voting."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Check user hasn't already voted
         if Vote.objects.filter(poll=poll, voter=request.user).exists():
             return Response(

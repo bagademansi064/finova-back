@@ -10,22 +10,26 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / '.env')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-r%u$$pc#%l_dp%!35t55xi@h&y9^=dpxzhs@le&lyi%ti_jmqj'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-r%u$$pc#%l_dp%!35t55xi@h&y9^=dpxzhs@le&lyi%ti_jmqj')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
 
 
 # Application definition
@@ -156,13 +160,17 @@ STATIC_URL = 'static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# CORS Settings (for frontend)
+# CORS Settings (for frontend/mobile app)
+CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React/Next.js dev server
-    "http://localhost:5173",  # Vite dev server
-    
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://192.168.0.1:3000", 
+    "http://26.49.245.3:3000",
+    "http://localhost",  # For Capacitor Android
+    "capacitor://localhost",  # For Capacitor iOS
 ]
-ALLOWED_HOSTS = ['192.168.0.106', 'localhost', '127.0.0.1','10.189.65.109','10.189.65.209']
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
 
 # Email settings for development (Prints email to console)
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

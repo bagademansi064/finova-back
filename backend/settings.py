@@ -161,25 +161,45 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # CORS Settings (for frontend/mobile app)
-CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://192.168.0.1:3000", 
-    "http://192.168.0.106:3000",
-    "http://localhost",  # For Capacitor Android
-    "capacitor://localhost",  # For Capacitor iOS
+CORS_ALLOW_CREDENTIALS = True
+
+# Allow all default headers PLUS the custom ngrok header
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'ngrok-skip-browser-warning',
 ]
 
+# Dynamically get ngrok URL from environment
+NGROK_URL = os.environ.get('NGROK_URL')
 
+# In development, allow ALL origins to avoid CORS issues with
+# mobile Capacitor, ngrok, and varying local IPs.
+# In production, switch to the explicit whitelist below.
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.0.1:3000", 
+        "http://192.168.0.106:3000",
+        "http://localhost",  # For Capacitor Android
+        "capacitor://localhost",  # For Capacitor iOS
+    ]
+    if NGROK_URL:
+        CORS_ALLOWED_ORIGINS.append(NGROK_URL)
 
 CSRF_TRUSTED_ORIGINS = [
-
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://192.168.0.1:3000",
     "http://192.168.0.106:3000",
 ]
+
+if NGROK_URL:
+    CSRF_TRUSTED_ORIGINS.append(NGROK_URL)
+
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
 
 # Email settings for development (Prints email to console)

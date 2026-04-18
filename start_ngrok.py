@@ -1,8 +1,11 @@
-import subprocess
-import time
-import requests
 import os
 import sys
+import time
+from pyngrok import ngrok, conf
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 # Configuration
 BACKEND_PORT = 8001
@@ -11,6 +14,8 @@ BACKEND_ENV_PATH = ".env"
 
 def update_env_file(file_path, key, value):
     if not os.path.exists(file_path):
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "w") as f:
             f.write(f"{key}={value}\n")
         return
@@ -30,27 +35,25 @@ def update_env_file(file_path, key, value):
             f.write(f"{key}={value}\n")
 
 def start_ngrok():
-    print(f"--- Starting ngrok on port {BACKEND_PORT} ---")
+    print(f"--- Starting pyngrok on port {BACKEND_PORT} ---")
     
-    # Run ngrok in the background
-    try:
-        ngrok_proc = subprocess.Popen(["ngrok", "http", str(BACKEND_PORT)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except FileNotFoundError:
-        print("Error: 'ngrok' command not found. Please install ngrok and add it to your PATH.")
-        sys.exit(1)
+    # Set authtoken if available
+    authtoken = os.getenv("NGROK_AUTHTOKEN")
+    if authtoken:
+        print("Using authtoken from .env")
+        ngrok.set_auth_token(authtoken)
+    else:
+        print("WARNING: No NGROK_AUTHTOKEN found in .env. Tunnels will expire in 2 hours.")
+        print("Get your token at: https://dashboard.ngrok.com/get-started/your-authtoken")
 
-    # Wait for ngrok to initialize
-    time.sleep(3)
-
-    # Get the public URL from ngrok local API
     try:
-        response = requests.get("http://127.0.0.1:4040/api/tunnels")
-        data = response.json()
-        public_url = data['tunnels'][0]['public_url']
+        # Start ngrok tunnel
+        # We explicitly use 127.0.0.1 to avoid IPv6 connection issues on Windows
+        public_url = ngrok.connect(f"127.0.0.1:{BACKEND_PORT}").public_url
         print(f"Success! ngrok is live at: {public_url}")
+        
     except Exception as e:
-        print(f"Error: Could not retrieve ngrok URL. {e}")
-        ngrok_proc.terminate()
+        print(f"Error: Could not start ngrok. {e}")
         sys.exit(1)
 
     # Update Frontend .env
@@ -65,16 +68,20 @@ def start_ngrok():
     update_env_file(BACKEND_ENV_PATH, "NGROK_URL", public_url)
 
     print("\n--- Done! ---")
-    print("1. Please restart your Django server (python manage.py runserver 0.0.0.0:8001)")
-    print("2. Please restart your Frontend dev server if needed.")
-    print("\nKeep this terminal open to keep the ngrok tunnel alive.")
+    print(f"1. RUN: python manage.py runserver 0.0.0.0:{BACKEND_PORT}")
+    print("2. RESTART: Your Frontend dev server to pick up new URLs.")
+    print("\nKeep this script running to keep the tunnel alive (Ctrl+C to stop).")
 
+    # Keep the script running
     try:
-        # Keep the script running to track the process
-        ngrok_proc.wait()
+        # ngrok process is managed by pyngrok in the background
+        # We just wait for keyboard interrupt
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down ngrok...")
-        ngrok_proc.terminate()
+        ngrok.kill()
 
 if __name__ == "__main__":
     start_ngrok()
+

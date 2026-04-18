@@ -312,7 +312,9 @@ class TradePollSerializer(serializers.ModelSerializer):
     is_expired = serializers.ReadOnlyField()
     discussion_stock_symbol = serializers.CharField(source='discussion.stock_symbol', read_only=True)
     discussion_type = serializers.CharField(source='discussion.discussion_type', read_only=True)
+    polled_price = serializers.DecimalField(source='discussion.polled_price', max_digits=12, decimal_places=2, read_only=True)
     votes = VoteSerializer(many=True, read_only=True)
+    voter_participation = serializers.ReadOnlyField(source='get_voter_participation')
 
     class Meta:
         model = TradePoll
@@ -322,6 +324,13 @@ class TradePollSerializer(serializers.ModelSerializer):
             'reduced_deadline', 'turbo_reduction_applied', 'status',
             'result_buy_count', 'result_sell_count', 'result_hold_count',
             'total_votes', 'total_eligible_voters', 'quorum_met', 'is_expired',
-            'votes', 'created_at', 'resolved_at',
+            'votes', 'voter_participation', 'created_at', 'resolved_at',
         ]
-        read_only_fields = '__all__'
+        read_only_fields = (
+            'id', 'discussion', 'discussion_stock_symbol', 'discussion_type',
+            'quorum_percentage', 'voting_deadline', 'original_deadline',
+            'reduced_deadline', 'turbo_reduction_applied', 'status',
+            'result_buy_count', 'result_sell_count', 'result_hold_count',
+            'total_votes', 'total_eligible_voters', 'quorum_met', 'is_expired',
+            'votes', 'voter_participation', 'created_at', 'resolved_at',
+        )

@@ -50,6 +50,27 @@ def parse_news_template(content):
     return [m.strip() for m in matches]
 
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+def broadcast_group_message(group_id, message_data):
+    """
+    Broadcast a message to a group's WebSocket room from outside a consumer.
+    message_data should be a dict formatted for the group_message_broadcast handler.
+    """
+    channel_layer = get_channel_layer()
+    if not channel_layer: return
+    
+    room_group_name = f"group_{str(group_id).replace('-', '_')}"
+    
+    async_to_sync(channel_layer.group_send)(
+        room_group_name,
+        {
+            'type': 'group_message_broadcast',
+            **message_data
+        }
+    )
+
 def detect_message_type(content):
     """
     Auto-detect message type based on content templates.

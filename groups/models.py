@@ -449,6 +449,13 @@ class Discussion(models.Model):
         help_text=_("Amount of pooled capital required to execute this trade")
     )
 
+    polled_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text=_("The market price at the moment the discussion was proposed")
+    )
+
     expires_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -605,7 +612,50 @@ class TradePoll(models.Model):
 
     @property
     def total_eligible_voters(self):
-        return self.discussion.group.members.filter(is_active=True).count()
+        """
+        Count of members who have contributed capital to the pool.
+        Only these members are eligible to vote and affect quorum.
+        """
+        return self.discussion.group.members.filter(
+            is_active=True,
+            user__wallet_transactions__wallet=self.discussion.group.wallet,
+            user__wallet_transactions__transaction_type='deposit'
+        ).distinct().count()
+
+    def get_voter_participation(self):
+        """
+        Returns a list of ALL active group members with their vote status.
+        Includes a 'has_capital' flag so the UI knows who is eligible to vote.
+        """
+        wallet = self.discussion.group.wallet
+
+        # Get ALL active members
+        all_members = self.discussion.group.members.filter(
+            is_active=True
+        ).select_related('user')
+
+        # Find members who have deposited capital
+        depositor_ids = set()
+        if wallet:
+            depositor_ids = set(
+                WalletTransaction.objects.filter(
+                    wallet=wallet,
+                    transaction_type='deposit'
+                ).values_list('user_id', flat=True)
+            )
+
+        # Get votes cast for this poll
+        votes = {v.voter_id: v.choice for v in self.votes.all()}
+
+        participation = []
+        for member in all_members:
+            participation.append({
+                "finova_id": member.user.finova_id,
+                "username": member.user.username,
+                "vote": votes.get(member.user_id, None),
+                "has_capital": member.user_id in depositor_ids,
+            })
+        return participation
 
     @property
     def is_expired(self):

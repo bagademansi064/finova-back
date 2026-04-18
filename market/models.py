@@ -11,7 +11,12 @@ class StockCache(models.Model):
     previous_close = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     day_high = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     day_low = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    open_price = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     volume = models.BigIntegerField(null=True, blank=True)
+    
+    avg_price = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    last_qty = models.IntegerField(null=True, blank=True)
+    ltq_time = models.CharField(max_length=20, null=True, blank=True)
     
     percent_change = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
     

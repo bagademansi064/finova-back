@@ -21,6 +21,7 @@ from .serializers import (
     JoinRequestSerializer, GroupInvitationSerializer
 )
 from .permissions import IsGroupMember, IsGroupAdmin
+from .utils import broadcast_group_message
 
 
 # ──────────────────── Helper Mixin ────────────────────
@@ -576,8 +577,59 @@ class DiscussionViewSet(GroupLookupMixin, viewsets.ModelViewSet):
         return Response(data)
 
     def perform_create(self, serializer):
+        from market.models import StockCache
         group = self.get_group()
-        serializer.save(group=group, proposed_by=self.request.user)
+        
+        # Capture current market price for "polled price"
+        symbol = self.request.data.get('stock_symbol', '').upper()
+        current_price = 0.00
+        if symbol:
+            cache = StockCache.objects.filter(symbol=symbol).first()
+            if cache:
+                current_price = float(cache.current_price)
+        
+        discussion = serializer.save(
+            group=group, 
+            proposed_by=self.request.user,
+            polled_price=current_price
+        )
+        
+        # If it's a "pitch" (buy/sell), auto-unlock voting and post to chat
+        if discussion.discussion_type in ['buy', 'sell']:
+            # Force unlock voting immediately
+            discussion.min_engagement_to_unlock_vote = 0
+            discussion.save(update_fields=['min_engagement_to_unlock_vote'])
+            
+            poll = discussion.unlock_voting()
+            
+            # Create a corresponding chat message so it appears in the thread
+            from .models import GroupMessage
+            content = f"/stock {discussion.stock_symbol} poll {discussion.discussion_type}"
+            msg = GroupMessage.objects.create(
+                group=group,
+                sender=self.request.user,
+                content=content,
+                message_type='stock_card',
+                stock_symbol=discussion.stock_symbol
+            )
+            
+            # Broadcast via WebSocket
+            from .utils import broadcast_group_message
+            broadcast_group_message(group.id, {
+                'id': str(msg.id),
+                'content': msg.content,
+                'message_type': msg.message_type,
+                'stock_symbol': msg.stock_symbol,
+                'sender_finova_id': self.request.user.finova_id,
+                'sender_username': self.request.user.username,
+                'is_pinned': msg.is_pinned,
+                'created_at': msg.created_at.isoformat(),
+                # Inject poll/discussion metadata for the frontend
+                'cardAction': 'poll',
+                'pollDirection': discussion.discussion_type,
+                'pollId': str(poll.id) if poll else None,
+                'discussionId': str(discussion.id)
+            })
 
     @action(detail=True, methods=['post'])
     def comment(self, request, group_finova_id=None, pk=None):
@@ -740,6 +792,14 @@ class TradePollViewSet(GroupLookupMixin, viewsets.ReadOnlyModelViewSet):
         # Check if quorum met → auto-resolve
         if poll.quorum_met:
             poll.resolve()
+
+        # Broadcast real-time update to the group WebSocket
+        broadcast_group_message(poll.discussion.group.id, {
+            'type': 'poll_update',
+            'poll_id': str(poll.id),
+            'stock_symbol': poll.discussion.stock_symbol,
+            'voter_username': request.user.username
+        })
 
         return Response({
             "message": f"Vote '{choice}' recorded.",

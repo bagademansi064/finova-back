@@ -43,6 +43,11 @@ urlpatterns = [
         name='group-discussion-comment',
     ),
     path(
+        '<str:group_finova_id>/discussions/<uuid:pk>/direct-vote/',
+        DiscussionViewSet.as_view({'post': 'direct_vote'}),
+        name='group-discussion-direct-vote',
+    ),
+    path(
         '<str:group_finova_id>/polls/',
         TradePollViewSet.as_view({'get': 'list'}),
         name='group-polls',

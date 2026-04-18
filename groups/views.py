@@ -514,7 +514,7 @@ class DiscussionViewSet(GroupLookupMixin, viewsets.ModelViewSet):
         data = serializer.data
         
         # Funding validation logic
-        if instance.status == 'pooling' or (instance.status == 'open' and instance.group.wallet.current_balance < instance.required_capital):
+        if instance.discussion_type == 'buy' and (instance.status == 'pooling' or (instance.status == 'open' and instance.group.wallet.current_balance < instance.required_capital)):
             data['requires_additional_funding'] = True
         else:
             data['requires_additional_funding'] = False
@@ -581,7 +581,7 @@ class DiscussionViewSet(GroupLookupMixin, viewsets.ModelViewSet):
             return Response({"error": "Proposal is not open."}, status=status.HTTP_400_BAD_REQUEST)
             
         wallet = discussion.group.wallet
-        if wallet.current_balance < discussion.required_capital:
+        if discussion.discussion_type == 'buy' and wallet.current_balance < discussion.required_capital:
             discussion.status = 'pooling'
             discussion.expires_at = timezone.now() + timezone.timedelta(hours=24)
             discussion.save(update_fields=['status', 'expires_at'])

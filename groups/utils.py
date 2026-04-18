@@ -54,7 +54,23 @@ def detect_message_type(content):
     """
     Auto-detect message type based on content templates.
     Returns tuple of (message_type, stock_symbol_or_none).
+    
+    Supported formats:
+      /stock "SYMBOL"           -> stock_card
+      /stock SYMBOL             -> stock_card
+      /stock SYMBOL discuss     -> stock_card
+      /stock SYMBOL poll buy    -> stock_card
+      /stock SYMBOL poll sell   -> stock_card
+      /stocks "SYMBOL"          -> stock_card  (legacy)
+      /news "topic"             -> news_card
     """
+    # New format: /stock SYMBOL [discuss|poll buy|poll sell]
+    new_pattern = r'/stock\s+["\']?([A-Za-z0-9._-]+)["\']?(?:\s+(?:discuss|poll\s+(?:buy|sell)))?'
+    match = re.match(new_pattern, content.strip(), re.IGNORECASE)
+    if match:
+        return 'stock_card', match.group(1).upper()
+    
+    # Legacy format: /stocks "SYMBOL"
     stocks = parse_stock_template(content)
     if stocks:
         return 'stock_card', stocks[0]
@@ -64,3 +80,4 @@ def detect_message_type(content):
         return 'news_card', None
     
     return 'text', None
+

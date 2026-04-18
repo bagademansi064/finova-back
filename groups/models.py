@@ -248,6 +248,8 @@ class WalletTransaction(models.Model):
         ('withdraw', 'Withdraw'),
         ('locked', 'Locked for Trade'),
         ('refund', 'Refunded'),
+        ('trade_buy', 'Trade Execution (Buy)'),
+        ('trade_sell', 'Trade Execution (Sell)'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -654,6 +656,42 @@ class TradePoll(models.Model):
             if votes[winner] > 0:
                 self.status = 'passed'
                 self.discussion.status = 'executed'
+
+                # Execute ledger changes if the group voted for the proposed action
+                if winner == self.discussion.discussion_type:
+                    wallet = self.discussion.group.wallet
+                    amount = self.discussion.required_capital
+
+                    if winner == 'buy':
+                        # Only execute if sufficient funds
+                        if wallet.current_balance >= amount:
+                            wallet.current_balance -= amount
+                            wallet.save(update_fields=['current_balance'])
+
+                            WalletTransaction.objects.create(
+                                wallet=wallet,
+                                user=self.discussion.proposed_by,
+                                amount=amount,
+                                transaction_type='trade_buy',
+                                reference_id=str(self.discussion.id)
+                            )
+                        else:
+                            # Not enough funds to execute the buy trade
+                            self.status = 'failed'
+                            self.discussion.status = 'cancelled'
+                    
+                    elif winner == 'sell':
+                        # Adds capital back to the wallet upon a successful sell vote
+                        wallet.current_balance += amount
+                        wallet.save(update_fields=['current_balance'])
+
+                        WalletTransaction.objects.create(
+                            wallet=wallet,
+                            user=self.discussion.proposed_by,
+                            amount=amount,
+                            transaction_type='trade_sell',
+                            reference_id=str(self.discussion.id)
+                        )
             else:
                 self.status = 'failed'
                 self.discussion.status = 'rejected'

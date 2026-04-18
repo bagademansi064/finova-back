@@ -97,5 +97,10 @@ The Micro-Investment App is structurally categorized into `Groups`, `Discussions
 ### Vote on a Proposal
 - **Method:** `POST`
 - **Endpoint:** `/api/groups/<group_id>/discussions/<discussion_id>/vote/`
-- **Payload:** `{"vote_type": "buy"}`
+- **Payload:** `{"choice": "buy"}` (or `"sell"`, `"hold"`)
+
 > **Turbo-Reduction Feature:** If 100% of the active group members cast their votes on an active Trade Poll, the backend server mathematically collapses the remaining voting window by **95%** instantly.
+
+> **Voting Ledger (Atomic Execution):**
+> - **Buy Proposals:** A successful 60%+ 'buy' outcome automatically deducts the proposed `required_capital` from the group's pooled capital (`GroupWallet`) and records a `trade_buy` ledger transaction.
+> - **Sell Proposals:** A successful 60%+ 'sell' outcome automatically credits the `required_capital` (as estimated proceeds) back to the group's pool and records a `trade_sell` ledger transaction. `Sell` proposals are entirely exempt from the "insufficient funds" (`requires_additional_funding`) gating mechanism.

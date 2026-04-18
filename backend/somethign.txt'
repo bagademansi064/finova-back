@@ -1,0 +1,15 @@
+now listen i want you to implement a another app in django called new section which is basically the news from diffrent sources all the way summrized adn then showing up the sources the news has been pulled that specific news so tell me 
+
+Here are the exact names to feed into Antigravity:
+
+Reuters
+
+Moneycontrol
+
+The Economic Times
+
+LiveMint
+
+NDTV Profit 
+
+this is the platfgorm where you can fetch from the news specifically i want you to pick somehow the similar news and bundle  it up topgether for ai to analyze it an dmake a summary of it in a sturucutre way 

@@ -41,13 +41,14 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
         content = text_data_json.get('content', '')
         reply_to_id = text_data_json.get('reply_to', None)
         message_type = text_data_json.get('message_type', 'text')
+        stock_symbol = text_data_json.get('stock_symbol', None)
         
         if not content:
             return
             
         # Save message to database
         saved_msg = await self.save_message(
-            self.scope['user'], self.group_id, content, reply_to_id, message_type
+            self.scope['user'], self.group_id, content, reply_to_id, message_type, stock_symbol
         )
         
         sender_username = self.scope['user'].username
@@ -87,13 +88,14 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
             return False
 
     @database_sync_to_async
-    def save_message(self, user, group_id, content, reply_to_id=None, message_type='text'):
+    def save_message(self, user, group_id, content, reply_to_id=None, message_type='text', stock_symbol=None):
         group = Group.objects.get(id=group_id)
         msg = GroupMessage.objects.create(
             group=group,
             sender=user,
             content=content,
             message_type=message_type,
+            stock_symbol=stock_symbol,
             reply_to_id=reply_to_id
         )
         

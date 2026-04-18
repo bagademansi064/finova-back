@@ -82,8 +82,7 @@ class GroupCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = self.context['request'].user
         group = Group.objects.create(created_by=user, **validated_data)
-        # Creator automatically becomes admin
-        GroupMember.objects.create(group=group, user=user, role='admin')
+        # Creator automatically becomes admin via post_save signal
         return group
 
 
@@ -107,6 +106,7 @@ class GroupDetailSerializer(serializers.ModelSerializer):
     member_count = serializers.ReadOnlyField()
     is_full = serializers.ReadOnlyField()
     members = GroupMemberSerializer(many=True, read_only=True)
+    wallet = GroupWalletSerializer(read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
     created_by_finova_id = serializers.CharField(source='created_by.finova_id', read_only=True)
 
@@ -115,7 +115,7 @@ class GroupDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'finova_id', 'name', 'description', 'guidelines',
             'group_photo', 'risk_level', 'max_members', 'member_count',
-            'is_full', 'requires_approval', 'minimum_trust_score', 'members', 'created_by', 'created_by_username',
+            'is_full', 'requires_approval', 'minimum_trust_score', 'members', 'wallet', 'created_by', 'created_by_username',
             'created_by_finova_id', 'is_active', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'finova_id', 'created_by', 'created_at', 'updated_at']

@@ -4,10 +4,16 @@ from .models import GroupMember, GroupMessage, Vote, Group, GroupWallet
 
 
 @receiver(post_save, sender=Group)
-def create_group_wallet(sender, instance, created, **kwargs):
-    """Auto-create a capital pool wallet when a group is formed."""
+def create_group_wallet_and_admin(sender, instance, created, **kwargs):
+    """Auto-create a capital pool wallet and set admin when a group is formed."""
     if created:
         GroupWallet.objects.create(group=instance)
+        if instance.created_by:
+            GroupMember.objects.get_or_create(
+                group=instance, 
+                user=instance.created_by, 
+                defaults={'role': 'admin'}
+            )
 
 
 @receiver(post_save, sender=GroupMember)

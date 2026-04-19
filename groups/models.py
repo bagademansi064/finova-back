@@ -4,6 +4,7 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
+from .utils import broadcast_group_message
 
 
 class Group(models.Model):
@@ -485,7 +486,16 @@ class Discussion(models.Model):
         )
 
     def unlock_voting(self):
-        """Transition from discussion to voting phase, creating a TradePoll."""
+        """Transition from discussion to voting phase, creating a TradePoll.
+        Idempotent: if a poll already exists, return it."""
+        # If a poll already exists, return it (idempotent)
+        existing_poll = getattr(self, 'poll', None)
+        try:
+            if existing_poll:
+                return existing_poll
+        except TradePoll.DoesNotExist:
+            pass
+
         if not self.can_unlock_voting:
             return None
         self.status = 'voting'
@@ -613,14 +623,14 @@ class TradePoll(models.Model):
     @property
     def total_eligible_voters(self):
         """
-        Count of members who have contributed capital to the pool.
-        Only these members are eligible to vote and affect quorum.
+        Count of all active members in the group.
+        This ensures the quorum (60%) is measured against the whole group.
+        Neglecting to deposit capital essentially counts as an 'Abstain' 
+        relative to the voting threshold.
         """
         return self.discussion.group.members.filter(
-            is_active=True,
-            user__wallet_transactions__wallet=self.discussion.group.wallet,
-            user__wallet_transactions__transaction_type='deposit'
-        ).distinct().count()
+            is_active=True
+        ).count()
 
     def get_voter_participation(self):
         """
@@ -663,9 +673,24 @@ class TradePoll(models.Model):
 
     @property
     def quorum_met(self):
+        """
+        Quorum now requires the WINNING action (usually buy/sell) to reach 
+        the threshold relative to ALL eligible voters (members with capital).
+        Silence counts as 'denied'.
+        """
         if self.total_eligible_voters == 0:
             return False
-        return (self.total_votes / self.total_eligible_voters * 100) >= self.quorum_percentage
+            
+        # Standardize target based on the original proposal
+        target_action = self.discussion.discussion_type
+        votes_count = 0
+        if target_action == 'buy':
+            votes_count = self.result_buy_count
+        elif target_action == 'sell':
+            votes_count = self.result_sell_count
+        
+        # Neglected = Denied: We check if YES votes meet the quorum % of TOTAL ELIGIBLE members.
+        return (votes_count / self.total_eligible_voters * 100) >= self.quorum_percentage
 
     def apply_turbo_reduction(self):
         """
@@ -675,7 +700,10 @@ class TradePoll(models.Model):
         """
         if self.turbo_reduction_applied:
             return
-        if self.total_votes >= self.total_eligible_voters and self.total_eligible_voters > 0:
+            
+        # Safeguard: Only trigger Turbo mode if there are at least 2 eligible voters
+        # and ALL have participated. For 1-person groups, duration remains standard.
+        if self.total_eligible_voters > 1 and self.total_votes >= self.total_eligible_voters:
             now = timezone.now()
             remaining = self.voting_deadline - now
             if remaining.total_seconds() > 0:
@@ -697,16 +725,19 @@ class TradePoll(models.Model):
             self.status = 'expired'
             self.discussion.status = 'expired'
         elif self.quorum_met:
-            # Determine winning action
+            # Under strict consensus, we only pass if the proposed action itself reached the quorum.
+            target_action = self.discussion.discussion_type
             votes = {
                 'buy': self.result_buy_count,
                 'sell': self.result_sell_count,
                 'hold': self.result_hold_count,
             }
-            winner = max(votes, key=votes.get)
-            if votes[winner] > 0:
+            
+            # Check if target action has enough votes (quorum_met already checked this)
+            if votes.get(target_action, 0) > 0:
                 self.status = 'passed'
                 self.discussion.status = 'executed'
+                winner = target_action
 
                 # Execute ledger changes if the group voted for the proposed action
                 if winner == self.discussion.discussion_type:
@@ -749,7 +780,10 @@ class TradePoll(models.Model):
                                 )
                                 holding.total_invested += amount
                                 holding.quantity += quantity
-                                holding.average_buy_price = holding.total_invested / holding.quantity
+                                if holding.quantity > 0:
+                                    holding.average_buy_price = holding.total_invested / holding.quantity
+                                else:
+                                    holding.average_buy_price = 0
                                 holding.save()
                         else:
                             # Not enough funds to execute the buy trade
@@ -804,6 +838,15 @@ class TradePoll(models.Model):
         self.resolved_at = timezone.now()
         self.save(update_fields=['status', 'resolved_at'])
         self.discussion.save(update_fields=['status'])
+
+        # Broadcast the resolution to the group WebSocket
+        broadcast_group_message(self.discussion.group.id, {
+            'type': 'poll_resolution',
+            'poll_id': str(self.id),
+            'status': self.status,
+            'stock_symbol': self.discussion.stock_symbol,
+            'outcome': self.status
+        })
 
 
 class Vote(models.Model):

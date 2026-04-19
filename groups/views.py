@@ -453,7 +453,8 @@ class GroupViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def withdraw(self, request, finova_id=None):
-        """Atomically withdraw funds from group pool back to user's individual capital."""
+        """Atomically withdraw funds from group pool back to user's individual capital.
+        Capped at user's net deposits (total deposited - total previously withdrawn)."""
         group = self.get_object()
         user = request.user
         amount = request.data.get('amount')
@@ -468,11 +469,29 @@ class GroupViewSet(viewsets.ModelViewSet):
             
         from django.db import transaction
         from django.contrib.auth import get_user_model
+        from django.db.models import Sum
         User = get_user_model()
         
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(id=user.id)
             locked_wallet = GroupWallet.objects.select_for_update().get(group=group)
+            
+            # Calculate user's net contribution to this group
+            user_deposits = WalletTransaction.objects.filter(
+                wallet=locked_wallet, user=locked_user, transaction_type='deposit'
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            
+            user_withdrawals = WalletTransaction.objects.filter(
+                wallet=locked_wallet, user=locked_user, transaction_type='withdraw'
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            
+            net_contribution = user_deposits - user_withdrawals
+            
+            if amount > net_contribution:
+                return Response({
+                    "error": f"You can only withdraw up to ₹{net_contribution} (your net deposit in this group).",
+                    "max_withdrawable": str(net_contribution)
+                }, status=status.HTTP_400_BAD_REQUEST)
             
             if locked_wallet.current_balance < amount:
                 return Response({"error": "Insufficient group pool funds."}, status=status.HTTP_400_BAD_REQUEST)
@@ -758,33 +777,43 @@ class TradePollViewSet(GroupLookupMixin, viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check user hasn't already voted
-        if Vote.objects.filter(poll=poll, voter=request.user).exists():
-            return Response(
-                {"error": "You have already voted on this poll."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # Check if user already voted to handle updates
+        existing_vote = Vote.objects.filter(poll=poll, voter=request.user).first()
 
         serializer = VoteCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         choice = serializer.validated_data['choice']
 
-        # Create vote
-        vote = Vote.objects.create(
-            poll=poll, voter=request.user, choice=choice
-        )
+        # If updating, subtract old tally first
+        if existing_vote:
+            if existing_vote.choice == 'buy':
+                poll.result_buy_count = max(0, poll.result_buy_count - 1)
+            elif existing_vote.choice == 'sell':
+                poll.result_sell_count = max(0, poll.result_sell_count - 1)
+            elif existing_vote.choice == 'hold':
+                poll.result_hold_count = max(0, poll.result_hold_count - 1)
+            
+            existing_vote.choice = choice
+            existing_vote.save()
+            message = f"Vote updated to '{choice}'."
+        else:
+            # Create new vote
+            Vote.objects.create(poll=poll, voter=request.user, choice=choice)
+            message = f"Vote '{choice}' recorded."
 
-        # Update tallies
+        # Add new tally
         if choice == 'buy':
             poll.result_buy_count += 1
         elif choice == 'sell':
             poll.result_sell_count += 1
         elif choice == 'hold':
             poll.result_hold_count += 1
+        
         poll.save(update_fields=['result_buy_count', 'result_sell_count', 'result_hold_count'])
 
-        # Increment user's global vote counter
-        request.user.record_vote()
+        # Record vote for statistics if it's new
+        if not existing_vote:
+            request.user.record_vote()
 
         # Check for Turbo-Reduction
         poll.apply_turbo_reduction()
@@ -793,7 +822,7 @@ class TradePollViewSet(GroupLookupMixin, viewsets.ReadOnlyModelViewSet):
         if poll.quorum_met:
             poll.resolve()
 
-        # Broadcast real-time update to the group WebSocket
+        # Broadcast update
         broadcast_group_message(poll.discussion.group.id, {
             'type': 'poll_update',
             'poll_id': str(poll.id),
@@ -802,10 +831,45 @@ class TradePollViewSet(GroupLookupMixin, viewsets.ReadOnlyModelViewSet):
         })
 
         return Response({
-            "message": f"Vote '{choice}' recorded.",
+            "message": message,
             "turbo_applied": poll.turbo_reduction_applied,
             "poll": TradePollSerializer(poll).data,
-        }, status=status.HTTP_201_CREATED)
+        }, status=status.HTTP_200_OK if existing_vote else status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def retract(self, request, group_finova_id=None, pk=None):
+        """
+        Remove a previously cast vote within the voting window.
+        """
+        poll = self.get_object()
+        if poll.status != 'active':
+            return Response({"error": "Poll is no longer active."}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_vote = Vote.objects.filter(poll=poll, voter=request.user).first()
+        if not existing_vote:
+            return Response({"error": "No vote found to retract."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Subtract tally
+        if existing_vote.choice == 'buy':
+            poll.result_buy_count = max(0, poll.result_buy_count - 1)
+        elif existing_vote.choice == 'sell':
+            poll.result_sell_count = max(0, poll.result_sell_count - 1)
+        elif existing_vote.choice == 'hold':
+            poll.result_hold_count = max(0, poll.result_hold_count - 1)
+        
+        existing_vote.delete()
+        poll.save(update_fields=['result_buy_count', 'result_sell_count', 'result_hold_count'])
+
+        # Broadcast update
+        broadcast_group_message(poll.discussion.group.id, {
+            'type': 'poll_update',
+            'poll_id': str(poll.id),
+            'stock_symbol': poll.discussion.stock_symbol,
+            'voter_username': request.user.username,
+            'action': 'retracted'
+        })
+
+        return Response({"message": "Vote retracted successfully."}, status=status.HTTP_200_OK)
 
 
 # ──────────────────── Group Invitations ────────────────────

@@ -61,37 +61,47 @@ class MarketDataView(views.APIView):
             
             # Synchronously fetch missing symbols so the user instantly gets what they searched for
             if missing_symbols:
-                for target_sym in missing_symbols:
+                from concurrent.futures import ThreadPoolExecutor
+
+                def fetch_ticker_data(target_sym):
                     try:
                         ticker = yf.Ticker(target_sym)
                         info = ticker.info
                         if info and ('currentPrice' in info or 'regularMarketPrice' in info):
                             price = info.get('currentPrice') or info.get('regularMarketPrice')
-                            new_stock = StockCache.objects.create(
-                                symbol=target_sym,
-                                current_price=Decimal(str(price or 0.0)),
-                                previous_close=Decimal(str(info.get('previousClose', 0.0))),
-                                open_price=Decimal(str(info.get('open', 0.0))),
-                                day_high=Decimal(str(info.get('dayHigh', 0.0))),
-                                day_low=Decimal(str(info.get('dayLow', 0.0))),
-                                volume=info.get('volume', 0),
-                                avg_price=Decimal(str(info.get('averageDailyVolume10Day', 0))), # Mocking avg price if not found
-                                last_qty=random.randint(1, 100),
-                                ltq_time=timezone.now().strftime("%H:%M:%S"),
-                                market_cap=info.get("marketCap"),
-                                pe_ratio=info.get("trailingPE"),
-                                pb_ratio=info.get("priceToBook"),
-                                sector=info.get("sector"),
-                                industry=info.get("industry")
-                            )
-                            # Calculate percent change inline
-                            if new_stock.previous_close and new_stock.previous_close > 0:
-                                new_stock.percent_change = ((new_stock.current_price - new_stock.previous_close) / new_stock.previous_close) * Decimal('100.0')
-                                new_stock.save(update_fields=['percent_change'])
-                                
-                            stocks.append(new_stock)
+                            with transaction.atomic():
+                                new_stock, created = StockCache.objects.update_or_create(
+                                    symbol=target_sym,
+                                    defaults={
+                                        'current_price': Decimal(str(price or 0.0)),
+                                        'previous_close': Decimal(str(info.get('previousClose', 0.0))),
+                                        'open_price': Decimal(str(info.get('open', 0.0))),
+                                        'day_high': Decimal(str(info.get('dayHigh', 0.0))),
+                                        'day_low': Decimal(str(info.get('dayLow', 0.0))),
+                                        'volume': info.get('volume', 0),
+                                        'avg_price': Decimal(str(info.get('averageDailyVolume10Day', 0))),
+                                        'last_qty': random.randint(1, 100),
+                                        'ltq_time': timezone.now().strftime("%H:%M:%S"),
+                                        'market_cap': info.get("marketCap"),
+                                        'pe_ratio': info.get("trailingPE"),
+                                        'pb_ratio': info.get("priceToBook"),
+                                        'sector': info.get("sector"),
+                                        'industry': info.get("industry")
+                                    }
+                                )
+                                # Calculate percent change inline
+                                if new_stock.previous_close and new_stock.previous_close > 0:
+                                    new_stock.percent_change = ((new_stock.current_price - new_stock.previous_close) / new_stock.previous_close) * Decimal('100.0')
+                                    new_stock.save(update_fields=['percent_change'])
+                                return new_stock
                     except Exception:
-                        pass # Ignore if ticker does not exist in Yahoo Finance
+                        return None
+
+                with ThreadPoolExecutor(max_workers=min(len(missing_symbols), 10)) as executor:
+                    results = list(executor.map(fetch_ticker_data, missing_symbols))
+                    for res in results:
+                        if res:
+                            stocks.append(res)
         else:
             stocks = StockCache.objects.all()
             

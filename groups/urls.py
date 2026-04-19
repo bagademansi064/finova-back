@@ -64,6 +64,11 @@ urlpatterns = [
         TradePollViewSet.as_view({'post': 'vote'}),
         name='group-poll-vote',
     ),
+    path(
+        '<str:group_finova_id>/polls/<uuid:pk>/retract/',
+        TradePollViewSet.as_view({'post': 'retract'}),
+        name='group-poll-retract',
+    ),
     # Main group CRUD routes (list, create, retrieve, update, delete, join, leave, etc.)
     path('', include(router.urls)),
 ]

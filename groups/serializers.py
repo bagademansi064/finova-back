@@ -159,15 +159,22 @@ class GroupListSerializer(serializers.ModelSerializer):
     """Compact serializer for listing groups."""
     member_count = serializers.ReadOnlyField()
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    pooled_capital = serializers.SerializerMethodField()
 
     class Meta:
         model = Group
         fields = [
-            'id', 'finova_id', 'name', 'group_photo', 'risk_level',
+            'id', 'finova_id', 'name', 'description', 'group_photo', 'risk_level',
             'member_count', 'max_members', 'created_by_username',
             'requires_approval', 'minimum_trust_score',
-            'is_active', 'created_at',
+            'is_active', 'created_at', 'pooled_capital',
         ]
+
+    def get_pooled_capital(self, obj):
+        try:
+            return str(obj.wallet.current_balance)
+        except Exception:
+            return "0.00"
 
 
 class GroupDetailSerializer(serializers.ModelSerializer):
@@ -253,7 +260,7 @@ class DiscussionCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Discussion
         fields = [
-            'stock_symbol', 'stock_name', 'discussion_type', 'reasoning',
+            'id', 'stock_symbol', 'stock_name', 'discussion_type', 'reasoning',
             'required_capital'
         ]
 
@@ -323,14 +330,14 @@ class TradePollSerializer(serializers.ModelSerializer):
             'quorum_percentage', 'voting_deadline', 'original_deadline',
             'reduced_deadline', 'turbo_reduction_applied', 'status',
             'result_buy_count', 'result_sell_count', 'result_hold_count',
-            'total_votes', 'total_eligible_voters', 'quorum_met', 'is_expired',
+            'total_votes', 'total_eligible_voters', 'quorum_met', 'is_expired', 'polled_price',
             'votes', 'voter_participation', 'created_at', 'resolved_at',
         ]
         read_only_fields = (
             'id', 'discussion', 'discussion_stock_symbol', 'discussion_type',
             'quorum_percentage', 'voting_deadline', 'original_deadline',
             'reduced_deadline', 'turbo_reduction_applied', 'status',
-            'result_buy_count', 'result_sell_count', 'result_hold_count',
+            'result_buy_count', 'result_sell_count', 'result_hold_count', 'polled_price',
             'total_votes', 'total_eligible_voters', 'quorum_met', 'is_expired',
             'votes', 'voter_participation', 'created_at', 'resolved_at',
         )
